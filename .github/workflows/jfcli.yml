@@ -71,10 +71,13 @@ jobs:
           run: |
             jf pipc --repo-deploy="${{env.RT_REPO_VIRTUAL}}" --repo-resolve="${{env.RT_REPO_VIRTUAL}}"
 
+        - name: "Xray: audit"
+          run: |
+            jf audit --pip --requirements-file=requirements.txt --threads=100 --format=table --extended-table --vuln --validate-secrets --sca --secrets
 
         - name: "Install dependencies (environment)"
           run: |
-            jf pip install -r requirements.txt
+            jf pip install -r requirements.txt --build-name="${{env.BUILD_NAME}}" --build-number="${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}
 
         - name: "Download requirements closure (direct + transitive for build-add-dependencies)"
           run: |
@@ -88,6 +91,11 @@ jobs:
             jf rt bce "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}"
             jf rt bad "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}" "${BAD_DEPS_DIR}/*"
             jf rt bp "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --detailed-summary=true
+
+        - name: "Xray: Build Scan"
+          continue-on-error: true
+          run: |
+            jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
 
   promoteBuildToDev:
     name: "Virtual to DEV local"
@@ -116,6 +124,11 @@ jobs:
             --include-dependencies \
             --copy
 
+      - name: "Xray: Build Scan"
+        continue-on-error: true
+        run: |
+          jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
+
   promoteBuildToQA: 
     name: "DEV to QA"
     runs-on: ubuntu-latest
@@ -124,22 +137,28 @@ jobs:
       run:
         working-directory: "${{env.DEFAULT_WORKSPACE}}"
     steps:
-        - name: "Setup JFrog CLI"
-          uses: jfrog/setup-jfrog-cli@v4
-          id: jfrog-cli
-          env:
-            JF_URL: ${{env.JF_RT_URL}}
-          with:
-            version: latest 
-            oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
-            disable-job-summary: ${{env.JOB_SUMMARY}}
+      - name: "Setup JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog-cli
+        env:
+          JF_URL: ${{env.JF_RT_URL}}
+        with:
+          version: latest 
+          oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
+          disable-job-summary: ${{env.JOB_SUMMARY}}
         
-        - name: "Build promote to QA"
-          env: 
-            STATUS_COMMENT: "Promoting build DEV to QA"
-          run: |
-            jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_QA}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
-        
+      - name: "Build promote to QA"
+        env: 
+          STATUS_COMMENT: "Promoting build DEV to QA"
+        run: |
+          jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_QA}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
+
+      - name: "Xray: Build Scan"
+        continue-on-error: true
+        run: |
+          jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
+
+
   promoteBuildToProd: 
     name: "Promote Build to Prod"
     runs-on: ubuntu-latest
@@ -148,21 +167,27 @@ jobs:
       run:
         working-directory: "${{env.DEFAULT_WORKSPACE}}"
     steps:
-        - name: "Setup JFrog CLI"
-          uses: jfrog/setup-jfrog-cli@v4
-          id: jfrog-cli
-          env:
-            JF_URL: ${{env.JF_RT_URL}}
-          with:
-            version: latest 
-            oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
-            disable-job-summary: ${{env.JOB_SUMMARY}}
-        
-        - name: "QA to Prod"
-          env: 
-            STATUS_COMMENT: "Promoting build QA to Prod"
-          run: |
-            jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_PROD}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
+      - name: "Setup JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        id: jfrog-cli
+        env:
+          JF_URL: ${{env.JF_RT_URL}}
+        with:
+          version: latest 
+          oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
+          disable-job-summary: ${{env.JOB_SUMMARY}}
+      
+      - name: "QA to Prod"
+        env: 
+          STATUS_COMMENT: "Promoting build QA to Prod"
+        run: |
+          jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_PROD}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
+
+      - name: "Xray: Build Scan"
+        continue-on-error: true
+        run: |
+          jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
+
 
   # Mirrors jfcli.sh: validate after bpr to dev-local (repo-root path, --include-deps=true, props fallback).
   validateDownloadDevLocal:
