@@ -8,6 +8,10 @@
 
 #### Artifactory screens
 
+![Repos](./images/repos.png)
+<br>
+![Repo virtual](./images/repo-virtual.png)
+<br>
 ![Builds](./images/builds.png)
 <br>
 ![Build ID](./images/build-id.png)
