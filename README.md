@@ -14,11 +14,17 @@
 <br>
 ![Builds](./images/builds.png)
 <br>
-![Build ID](./images/build-id.png)
+![Build - ID](./images/build-id.png)
 <br>
-![Build Module info](./images/build_module-dep.png)
+![Build - Module info](./images/build_module-dep.png)
 <br>
-![Build Promote](./images/build-promote.png)
+![Build - Promote](./images/build-promote.png)
+<br>
+![Build - Xray Data](./images/build-xraydata.png)
+<br>
+![Build - VCS](./images/build-vcs.png)
+<br>
+![Build - Info](./images/build-info.png)
 
 ## References
 - JF CLI: https://docs.jfrog.com/artifactory/docs/build-integration#promoting-a-build

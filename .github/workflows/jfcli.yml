@@ -208,7 +208,7 @@ jobs:
         with:
           version: latest
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
-          disable-job-summary: ${{ env.JOB_SUMMARY }}
+          disable-job-summary: true
 
       - name: "Validate download from dev-local"
         run: |
@@ -257,12 +257,21 @@ jobs:
             echo "::error::no files under ${VALIDATE_DL_DIR} for build ${BUILD_NAME}/${BUILD_ID}"
             exit 1
           fi
-          echo "OK: ${n} file(s) → ${VALIDATE_DL_DIR}"
+          echo "OK: ${n} file(s) → ${{env.VALIDATE_DL_DIR}}"
+          echo ""
+          echo "Downloaded files (${{env.VALIDATE_DL_DIR}}):"
+          find "${{env.VALIDATE_DL_DIR}}" -type f -print | sort
           {
-            echo "## Validate download — ${RT_REPO_LOCAL_DEV}"
+            echo "## Validate download — ${{env.RT_REPO_LOCAL_DEV}}"
             echo ""
-            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
+            echo ""
+            echo "### Files"
+            echo ""
+            echo '```'
+            find "${{env.VALIDATE_DL_DIR}}" -type f | sort
+            echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
   validateDownloadQaLocal:
@@ -279,7 +288,7 @@ jobs:
         with:
           version: latest
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
-          disable-job-summary: ${{ env.JOB_SUMMARY }}
+          disable-job-summary: true
 
       - name: "Download artifacts for build from qa-local"
         run: |
@@ -322,7 +331,7 @@ jobs:
         with:
           version: latest
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
-          disable-job-summary: ${{ env.JOB_SUMMARY }}
+          disable-job-summary: true
 
       - name: "Download artifacts for build from prod-local"
         run: |
@@ -369,7 +378,7 @@ jobs:
           with:
             version: latest
             oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
-            disable-job-summary: ${{env.JOB_SUMMARY}}
+            disable-job-summary: true
 
         - name: "Build API + checkout (prod-local)"
           run: |
@@ -385,40 +394,10 @@ jobs:
             BF="${{env.PROMOTE_CHECKOUT_DIR}}/build-info.json"
             if [[ "${API_OK}" -eq 1 ]] && jq empty "${BF}" 2>/dev/null; then
               {
-                echo "## Build API status"
-                echo ""
-                echo "| Check | Result |"
-                echo "|--------|--------|"
-                if jq -e '.errors' "${BF}" >/dev/null 2>&1; then
-                  echo -n "| **errors (API)** | "
-                  jq -c '.errors' "${BF}"
-                  echo " |"
-                else
-                  echo "| **errors (top-level)** | _none_ |"
-                fi
-                echo ""
-                echo "## Build metadata"
-                echo ""
-                echo "| Field | Value |"
-                echo "|--------|-------|"
-                jq -r '
-                  def fmt_ts:
-                    if . == null or . == "" then "—"
-                    elif type == "string" and test("^[0-9]+$") then (tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC"))
-                    elif type == "number" then (. / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC"))
-                    else tostring end;
-                  (.buildInfo // .) as $b
-                  | "| **name** | \($b.name // "—") |",
-                    "| **number** | \($b.number // "—") |",
-                    "| **started** | (\($b.started) | fmt_ts) |",
-                    "| **modules** | \( ($b.modules // []) | length ) |",
-                    "| **dependency ids (distinct)** | \( [ ($b.modules // [])[] | .dependencies[]? | select(.id != null) | .id ] | unique | length ) |"
-                ' "${BF}"
-                echo ""
                 echo "## Promotion statuses (buildInfo.statuses)"
                 echo ""
-                echo "| Timestamp (UTC) | Status | Comment | User |"
-                echo "|-----------------|--------|---------|------|"
+                echo "| Timestamp (UTC) | Status "
+                echo "|-----------------|--------|"
                 jq -r '
                   def fmt_ts:
                     if . == null or . == "" then "—"
@@ -427,7 +406,7 @@ jobs:
                     else tostring end;
                   (.buildInfo // .).statuses // []
                   | .[]
-                  | "| \((.timestamp | fmt_ts)) | \(.status // "—") | \(.comment // "—") | \(.user // "—") |"
+                  | "| \((.timestamp | fmt_ts)) | \(.status // "—") |"
                 ' "${BF}"
                 echo ""
               } > "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
@@ -471,10 +450,5 @@ jobs:
               echo ""
               cat "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
               echo ""
-              echo "## Prod-local search (excerpt)"
-              echo ""
-              echo '```json'
-              head -c 8000 "${{env.PROMOTE_CHECKOUT_DIR}}/promoted-artifacts-search.json" || true
-              echo ""
-              echo '```'
+              
             } >> "${GITHUB_STEP_SUMMARY}"
