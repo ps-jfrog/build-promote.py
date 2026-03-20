@@ -89,6 +89,33 @@ jobs:
             jf rt bad "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}" "${BAD_DEPS_DIR}/*"
             jf rt bp "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --detailed-summary=true
 
+  promoteBuildToDev:
+    name: "Virtual to DEV local"
+    runs-on: ubuntu-latest
+    needs: buildPublish
+    defaults:
+      run:
+        working-directory: "${{ env.DEFAULT_WORKSPACE }}"
+    steps:
+      - name: "Setup JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ env.JF_RT_URL }}
+        with:
+          version: latest
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
+          disable-job-summary: ${{ env.JOB_SUMMARY }}
+
+      - name: "Build promote to dev-local"
+        env:
+          STATUS_COMMENT: "Promoting build virtual to DEV local"
+        run: |
+          set -euo pipefail
+          jf rt bpr "${{ env.BUILD_NAME }}" "${{ env.BUILD_ID }}" "${{ env.RT_REPO_LOCAL_DEV }}" \
+            --status="${STATUS_COMMENT}" \
+            --include-dependencies \
+            --copy
+
   promoteBuildToQA: 
     name: "DEV to QA"
     runs-on: ubuntu-latest
@@ -137,13 +164,13 @@ jobs:
           run: |
             jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_PROD}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
 
-  # Artifacts + build properties exist on the virtual repo after jf rt bp — not on *-local until promote.
+  # Mirrors jfcli.sh: validate after bpr to dev-local (repo-root path, --include-deps=true, props fallback).
   validateDownloadDevLocal:
-    name: "Validate download (virtual after publish)"
+    name: "Validate download (dev-local)"
     runs-on: ubuntu-latest
-    needs: buildPublish
+    needs: promoteBuildToDev
     env:
-      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-virtual"
+      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-dev-local"
     steps:
       - name: "Setup JFrog CLI"
         uses: jfrog/setup-jfrog-cli@v4
@@ -154,29 +181,60 @@ jobs:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
           disable-job-summary: ${{ env.JOB_SUMMARY }}
 
-      - name: "Download published build artifacts (virtual)"
+      - name: "Validate download from dev-local"
         run: |
           set -euo pipefail
-          mkdir -p "${{env.VALIDATE_DL_DIR}}"
-          echo "Search (build artifacts in ${{env.RT_REPO_VIRTUAL}}):"
-          jf rt search "${{env.RT_REPO_VIRTUAL}}/*" --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" | head -50 || true
-          jf rt download "${{env.RT_REPO_VIRTUAL}}/*" "${{env.VALIDATE_DL_DIR}}/" \
-            --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
+          sleep 2
+          rm -rf "${VALIDATE_DL_DIR}"
+          mkdir -p "${VALIDATE_DL_DIR}"
+          echo "*** Validate download: ${RT_REPO_LOCAL_DEV} (build ${BUILD_NAME} / ${BUILD_ID}) ***"
+          echo "Search (first matches):"
+          jf rt search \
+            --build="${BUILD_NAME}/${BUILD_ID}" \
+            --include-deps=true \
+            "${RT_REPO_LOCAL_DEV}/" | head -50 || true
+
+          _download_ok=0
+          if jf rt download \
+            --build="${BUILD_NAME}/${BUILD_ID}" \
+            --include-deps=true \
             --flat=true \
             --fail-no-op=true \
-            --detailed-summary=true
-          n="$(find "${{env.VALIDATE_DL_DIR}}" -type f | wc -l | tr -d ' ')"
-          if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files downloaded from ${{env.RT_REPO_VIRTUAL}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Publish may not have stamped artifacts, or build id mismatch."
+            --detailed-summary=true \
+            "${RT_REPO_LOCAL_DEV}/" \
+            "${VALIDATE_DL_DIR}/"
+          then
+            _download_ok=1
+          else
+            echo "::warning::download with --build failed; retrying with build.name / build.number properties..."
+            if jf rt download \
+              --props="build.name=${BUILD_NAME};build.number=${BUILD_ID}" \
+              --flat=true \
+              --fail-no-op=true \
+              --detailed-summary=true \
+              "${RT_REPO_LOCAL_DEV}/" \
+              "${VALIDATE_DL_DIR}/"
+            then
+              _download_ok=1
+            fi
+          fi
+
+          if [[ "${_download_ok}" -ne 1 ]]; then
+            echo "::error::jf rt download found no files in ${RT_REPO_LOCAL_DEV} for build ${BUILD_NAME}/${BUILD_ID}. Confirm bpr to dev-local and artifact build properties."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${{env.RT_REPO_VIRTUAL}}"
+          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          if [[ "${n}" -lt 1 ]]; then
+            echo "::error::no files under ${VALIDATE_DL_DIR} for build ${BUILD_NAME}/${BUILD_ID}"
+            exit 1
+          fi
+          echo "OK: ${n} file(s) → ${VALIDATE_DL_DIR}"
           {
-            echo "## Validate download — ${{env.RT_REPO_VIRTUAL}} (post-publish)"
+            echo "## Validate download — ${RT_REPO_LOCAL_DEV}"
             echo ""
-            echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
+            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
             echo "- **Files downloaded:** ${n}"
-          } >> GITHUB_STEP_SUMMARY
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   validateDownloadQaLocal:
     name: "Validate download (qa-local)"
@@ -199,12 +257,15 @@ jobs:
           set -euo pipefail
           mkdir -p "${{env.VALIDATE_DL_DIR}}"
           echo "Search (qa-local):"
-          jf rt search "${{env.RT_REPO_LOCAL_QA}}/*" --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" | head -50 || true
-          jf rt download "${{env.RT_REPO_LOCAL_QA}}/*" "${{env.VALIDATE_DL_DIR}}/" \
+          jf rt search --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" --include-deps=true "${{env.RT_REPO_LOCAL_QA}}/" | head -50 || true
+          jf rt download \
             --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
+            --include-deps=true \
             --flat=true \
             --fail-no-op=true \
-            --detailed-summary=true
+            --detailed-summary=true \
+            "${{env.RT_REPO_LOCAL_QA}}/" \
+            "${{env.VALIDATE_DL_DIR}}/"
           n="$(find "${{env.VALIDATE_DL_DIR}}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
             echo "::error::No files in ${{env.RT_REPO_LOCAL_QA}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Check bpr --copy and build properties on promoted artifacts."
@@ -216,7 +277,7 @@ jobs:
             echo ""
             echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
-          } >> GITHUB_STEP_SUMMARY
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   validateDownloadProdLocal:
     name: "Validate download (prod-local)"
@@ -239,12 +300,15 @@ jobs:
           set -euo pipefail
           mkdir -p "${{env.VALIDATE_DL_DIR}}"
           echo "Search (prod-local):"
-          jf rt search "${{env.RT_REPO_LOCAL_PROD}}/*" --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" | head -50 || true
-          jf rt download "${{env.RT_REPO_LOCAL_PROD}}/*" "${{env.VALIDATE_DL_DIR}}/" \
+          jf rt search --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" --include-deps=true "${{env.RT_REPO_LOCAL_PROD}}/" | head -50 || true
+          jf rt download \
             --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
+            --include-deps=true \
             --flat=true \
             --fail-no-op=true \
-            --detailed-summary=true
+            --detailed-summary=true \
+            "${{env.RT_REPO_LOCAL_PROD}}/" \
+            "${{env.VALIDATE_DL_DIR}}/"
           n="$(find "${{env.VALIDATE_DL_DIR}}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
             echo "::error::No files in ${{env.RT_REPO_LOCAL_PROD}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Check bpr --copy and build properties."
@@ -256,7 +320,7 @@ jobs:
             echo ""
             echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
-          } >> GITHUB_STEP_SUMMARY
+          } >> "${GITHUB_STEP_SUMMARY}"
 
   promoteSummary:
     name: "Promote Summary"
@@ -350,15 +414,18 @@ jobs:
             echo "--- build-api-summary.md ---"
             cat "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
 
-            jf rt search "${{env.RT_REPO_LOCAL_PROD}}/*" \
+            jf rt search \
               --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
-              --include-deps \
+              --include-deps=true \
+              "${{env.RT_REPO_LOCAL_PROD}}/" \
               | tee "${{env.PROMOTE_CHECKOUT_DIR}}/promoted-artifacts-search.json"
-            jf rt download "${{env.RT_REPO_LOCAL_PROD}}/*" "${{env.PROMOTE_CHECKOUT_DIR}}/files/" \
+            jf rt download \
               --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
-              --include-deps \
+              --include-deps=true \
               --flat=true \
-              --detailed-summary=true
+              --detailed-summary=true \
+              "${{env.RT_REPO_LOCAL_PROD}}/" \
+              "${{env.PROMOTE_CHECKOUT_DIR}}/files/"
 
         - name: "Upload promotion checkout artifact"
           uses: actions/upload-artifact@v4
@@ -381,4 +448,4 @@ jobs:
               head -c 8000 "${{env.PROMOTE_CHECKOUT_DIR}}/promoted-artifacts-search.json" || true
               echo ""
               echo '```'
-            } >> GITHUB_STEP_SUMMARY
+            } >> "${GITHUB_STEP_SUMMARY}"
