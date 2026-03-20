@@ -27,6 +27,8 @@ jobs:
   buildPublish: 
     name: "Create Build and Publish"
     runs-on: ubuntu-latest
+    env:
+      BAD_DEPS_DIR: "${{ github.workspace }}/.jfrog/bad-deps"
     defaults:
         run:
           working-directory: "${{env.DEFAULT_WORKSPACE}}"
@@ -70,15 +72,21 @@ jobs:
             jf pipc --repo-deploy="${{env.RT_REPO_VIRTUAL}}" --repo-resolve="${{env.RT_REPO_VIRTUAL}}"
 
 
-        - name: "Create build"
-          run: | 
-            jf pip install -r requirements.txt --build-name="${{env.BUILD_NAME}}" --build-number="${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}"
+        - name: "Install dependencies (environment)"
+          run: |
+            jf pip install -r requirements.txt
+
+        - name: "Download requirements closure (direct + transitive for build-add-dependencies)"
+          run: |
+            set -euo pipefail
+            mkdir -p "${BAD_DEPS_DIR}"
+            jf pip download -r requirements.txt -d "${BAD_DEPS_DIR}"
 
         - name: "Build info"
           run: |
             jf rt bag "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}"
             jf rt bce "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}"
-            jf rt bad "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}" "${{env.RT_REPO_VIRTUAL}}/" --from-rt
+            jf rt bad "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}" "${BAD_DEPS_DIR}/*"
             jf rt bp "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --detailed-summary=true
 
   promoteBuildToQA: 
