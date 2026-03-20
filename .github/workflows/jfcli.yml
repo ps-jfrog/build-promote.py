@@ -77,7 +77,7 @@ jobs:
 
         - name: "Install dependencies (environment)"
           run: |
-            jf pip install -r requirements.txt --build-name="${{env.BUILD_NAME}}" --build-number="${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}
+            jf pip install -r requirements.txt --build-name="${{env.BUILD_NAME}}" --build-number="${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}"
 
         - name: "Download requirements closure (direct + transitive for build-add-dependencies)"
           run: |
