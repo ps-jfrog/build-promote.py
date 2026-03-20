@@ -23,7 +23,7 @@ jobs:
     # "frogbot" GitHub environment can approve the pull request to be scanned.
     environment: frogbot
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # - name: NodeJS upgrade
       #   uses: actions/setup-node@v4  # ref: https://github.com/actions/setup-node

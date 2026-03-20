@@ -45,7 +45,7 @@ jobs:
             disable-job-summary: ${{env.JOB_SUMMARY}}
 
         - name: Checkout
-          uses: actions/checkout@v4
+          uses: actions/checkout@v6
 
         - name: "Folder list"
           run: | 
@@ -109,6 +109,7 @@ jobs:
         uses: jfrog/setup-jfrog-cli@v4
         env:
           JF_URL: ${{ env.JF_RT_URL }}
+          JF_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           version: latest
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
@@ -142,6 +143,7 @@ jobs:
         id: jfrog-cli
         env:
           JF_URL: ${{env.JF_RT_URL}}
+          JF_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           version: latest 
           oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
@@ -172,6 +174,7 @@ jobs:
         id: jfrog-cli
         env:
           JF_URL: ${{env.JF_RT_URL}}
+          JF_GIT_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           version: latest 
           oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
@@ -453,7 +456,7 @@ jobs:
               "${{env.PROMOTE_CHECKOUT_DIR}}/files/"
 
         - name: "Upload promotion checkout artifact"
-          uses: actions/upload-artifact@v4
+          uses: actions/upload-artifact@v6
           with:
             name: promote-checkout-${{ github.run_number }}
             path: promote-checkout/
