@@ -1,0 +1,372 @@
+name: "JF-CLI: Build Promote"
+on:
+  push:
+    branches: 
+      - '**'
+permissions:
+  actions: read # for detecting the Github Actions environment.
+  id-token: write # for creating OIDC tokens for signing.
+  packages: write # for uploading attestations.
+  contents: read
+  security-events: write # Required for uploading code scanning.
+env:
+  JF_RT_URL: "https://psazuse.jfrog.io"
+  JOB_SUMMARY: false
+  JFROG_CLI_LOG_LEVEL: DEBUG # DEBUG, INFO, WARN, ERROR
+  DEFAULT_WORKSPACE: "${{github.workspace}}" 
+  BUILD_ID: "${{github.run_number}}.0"
+  BUILD_NAME: "py-bpr-app" 
+  MODULE_NAME: "py-artifacts"
+  RT_REPO_VIRTUAL: "py-bpr-virtual"
+  RT_REPO_LOCAL_DEV: "py-bpr-dev-local"
+  RT_REPO_LOCAL_QA: "py-bpr-qa-local"
+  RT_REPO_LOCAL_PROD: "py-bpr-prod-local"
+  RT_REPO_REMOTE: "pypi-remote"
+
+jobs:
+  buildPublish: 
+    name: "Create Build and Publish"
+    runs-on: ubuntu-latest
+    defaults:
+        run:
+          working-directory: "${{env.DEFAULT_WORKSPACE}}"
+    steps:
+        - name: "Setup JFrog CLI"
+          uses: jfrog/setup-jfrog-cli@v4  # 
+          id: jfrog-cli
+          env:
+            JF_URL: ${{env.JF_RT_URL}}
+            JFROG_CLI_LOG_LEVEL: "DEBUG"
+          with:
+            version: latest 
+            oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
+            disable-job-summary: ${{env.JOB_SUMMARY}}
+
+        - name: Checkout
+          uses: actions/checkout@v4
+
+        - name: "Folder list"
+          run: | 
+              tree .
+
+        - name: "JF Show"
+          run: | 
+              jf c s
+
+        - name: "Setup Summary"
+          run: |
+            echo "# :frog: Setup Summary :pushpin:" >> $GITHUB_STEP_SUMMARY
+            echo " " >> $GITHUB_STEP_SUMMARY
+            echo " " >> $GITHUB_STEP_SUMMARY
+            echo " - Installed JFrog CLI [$(jf --version)](https://jfrog.com/getcli/) " >> $GITHUB_STEP_SUMMARY
+            echo "    - $(jf --version) " >> $GITHUB_STEP_SUMMARY
+            echo "    - $(python3 -V) " >> $GITHUB_STEP_SUMMARY
+            echo "    - $(pip3 -V) " >> $GITHUB_STEP_SUMMARY
+            echo " " >> $GITHUB_STEP_SUMMARY
+            echo " " >> $GITHUB_STEP_SUMMARY
+            
+        - name: "Create pip config"
+          run: |
+            jf pipc --repo-deploy="${{env.RT_REPO_VIRTUAL}}" --repo-resolve="${{env.RT_REPO_VIRTUAL}}"
+
+
+        - name: "Create build"
+          run: | 
+            jf pip install -r requirements.txt --build-name="${{env.BUILD_NAME}}" --build-number="${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}"
+
+        - name: "Build info"
+          run: |
+            jf rt bag "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}"
+            jf rt bce "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}"
+            jf rt bad "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --module="${{env.MODULE_NAME}}" "${{env.RT_REPO_VIRTUAL}}/" --from-rt
+            jf rt bp "${{env.BUILD_NAME}}" "${{env.BUILD_ID}}" --detailed-summary=true
+
+  promoteBuildToQA: 
+    name: "DEV to QA"
+    runs-on: ubuntu-latest
+    needs: buildPublish
+    defaults:
+      run:
+        working-directory: "${{env.DEFAULT_WORKSPACE}}"
+    steps:
+        - name: "Setup JFrog CLI"
+          uses: jfrog/setup-jfrog-cli@v4
+          id: jfrog-cli
+          env:
+            JF_URL: ${{env.JF_RT_URL}}
+          with:
+            version: latest 
+            oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
+            disable-job-summary: ${{env.JOB_SUMMARY}}
+        
+        - name: "Build promote to QA"
+          env: 
+            STATUS_COMMENT: "Promoting build DEV to QA"
+          run: |
+            jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_QA}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
+        
+  promoteBuildToProd: 
+    name: "Promote Build to Prod"
+    runs-on: ubuntu-latest
+    needs: promoteBuildToQA
+    defaults:
+      run:
+        working-directory: "${{env.DEFAULT_WORKSPACE}}"
+    steps:
+        - name: "Setup JFrog CLI"
+          uses: jfrog/setup-jfrog-cli@v4
+          id: jfrog-cli
+          env:
+            JF_URL: ${{env.JF_RT_URL}}
+          with:
+            version: latest 
+            oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
+            disable-job-summary: ${{env.JOB_SUMMARY}}
+        
+        - name: "QA to Prod"
+          env: 
+            STATUS_COMMENT: "Promoting build QA to Prod"
+          run: |
+            jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_PROD}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
+
+  validateDownloadDevLocal:
+    name: "Validate download (dev-local)"
+    runs-on: ubuntu-latest
+    needs: buildPublish
+    env:
+      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-dev-local"
+    steps:
+      - name: "Setup JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ env.JF_RT_URL }}
+        with:
+          version: latest
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
+          disable-job-summary: ${{ env.JOB_SUMMARY }}
+
+      - name: "Download artifacts for build from dev-local"
+        run: |
+          set -euo pipefail
+          mkdir -p "${VALIDATE_DL_DIR}"
+          jf rt download "${RT_REPO_LOCAL_DEV}/*" "${VALIDATE_DL_DIR}/" \
+            --build="${BUILD_NAME}/${BUILD_ID}" \
+            --include-deps \
+            --flat=true \
+            --fail-no-op=true \
+            --detailed-summary=true
+          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          if [[ "${n}" -lt 1 ]]; then
+            echo "::error::No files downloaded from ${RT_REPO_LOCAL_DEV} for build ${BUILD_NAME}/${BUILD_ID}"
+            exit 1
+          fi
+          echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_DEV}"
+          {
+            echo "## Validate download — ${RT_REPO_LOCAL_DEV}"
+            echo ""
+            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Files downloaded:** ${n}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  validateDownloadQaLocal:
+    name: "Validate download (qa-local)"
+    runs-on: ubuntu-latest
+    needs: promoteBuildToQA
+    env:
+      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-qa-local"
+    steps:
+      - name: "Setup JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ env.JF_RT_URL }}
+        with:
+          version: latest
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
+          disable-job-summary: ${{ env.JOB_SUMMARY }}
+
+      - name: "Download artifacts for build from qa-local"
+        run: |
+          set -euo pipefail
+          mkdir -p "${VALIDATE_DL_DIR}"
+          jf rt download "${RT_REPO_LOCAL_QA}/*" "${VALIDATE_DL_DIR}/" \
+            --build="${BUILD_NAME}/${BUILD_ID}" \
+            --include-deps \
+            --flat=true \
+            --fail-no-op=true \
+            --detailed-summary=true
+          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          if [[ "${n}" -lt 1 ]]; then
+            echo "::error::No files downloaded from ${RT_REPO_LOCAL_QA} for build ${BUILD_NAME}/${BUILD_ID}"
+            exit 1
+          fi
+          echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_QA}"
+          {
+            echo "## Validate download — ${RT_REPO_LOCAL_QA}"
+            echo ""
+            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Files downloaded:** ${n}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  validateDownloadProdLocal:
+    name: "Validate download (prod-local)"
+    runs-on: ubuntu-latest
+    needs: promoteBuildToProd
+    env:
+      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-prod-local"
+    steps:
+      - name: "Setup JFrog CLI"
+        uses: jfrog/setup-jfrog-cli@v4
+        env:
+          JF_URL: ${{ env.JF_RT_URL }}
+        with:
+          version: latest
+          oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
+          disable-job-summary: ${{ env.JOB_SUMMARY }}
+
+      - name: "Download artifacts for build from prod-local"
+        run: |
+          set -euo pipefail
+          mkdir -p "${VALIDATE_DL_DIR}"
+          jf rt download "${RT_REPO_LOCAL_PROD}/*" "${VALIDATE_DL_DIR}/" \
+            --build="${BUILD_NAME}/${BUILD_ID}" \
+            --include-deps \
+            --flat=true \
+            --fail-no-op=true \
+            --detailed-summary=true
+          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          if [[ "${n}" -lt 1 ]]; then
+            echo "::error::No files downloaded from ${RT_REPO_LOCAL_PROD} for build ${BUILD_NAME}/${BUILD_ID}"
+            exit 1
+          fi
+          echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_PROD}"
+          {
+            echo "## Validate download — ${RT_REPO_LOCAL_PROD}"
+            echo ""
+            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Files downloaded:** ${n}"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  promoteSummary:
+    name: "Promote Summary"
+    runs-on: ubuntu-latest
+    needs:
+      - promoteBuildToProd
+      - validateDownloadDevLocal
+      - validateDownloadQaLocal
+      - validateDownloadProdLocal
+    env:
+      PROMOTE_CHECKOUT_DIR: "${{github.workspace}}/promote-checkout"
+    steps:
+        - name: "Setup JFrog CLI"
+          uses: jfrog/setup-jfrog-cli@v4
+          env:
+            JF_URL: ${{env.JF_RT_URL}}
+          with:
+            version: latest
+            oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
+            disable-job-summary: ${{env.JOB_SUMMARY}}
+
+        - name: "Build API + checkout (prod-local)"
+          run: |
+            set -euo pipefail
+            mkdir -p "${PROMOTE_CHECKOUT_DIR}/files"
+            API_OK=0
+            if jf rt curl -sf "api/build/${BUILD_NAME}/${BUILD_ID}" > "${PROMOTE_CHECKOUT_DIR}/build-info.json"; then
+              API_OK=1
+            else
+              echo "::warning::api/build request failed"
+            fi
+
+            BF="${PROMOTE_CHECKOUT_DIR}/build-info.json"
+            if [[ "${API_OK}" -eq 1 ]] && jq empty "${BF}" 2>/dev/null; then
+              {
+                echo "## Build API status"
+                echo ""
+                echo "| Check | Result |"
+                echo "|--------|--------|"
+                if jq -e '.errors' "${BF}" >/dev/null 2>&1; then
+                  echo -n "| **errors (API)** | "
+                  jq -c '.errors' "${BF}"
+                  echo " |"
+                else
+                  echo "| **errors (top-level)** | _none_ |"
+                fi
+                echo ""
+                echo "## Build metadata"
+                echo ""
+                echo "| Field | Value |"
+                echo "|--------|-------|"
+                jq -r '
+                  def fmt_ts:
+                    if . == null or . == "" then "—"
+                    elif type == "string" and test("^[0-9]+$") then (tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC"))
+                    elif type == "number" then (. / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC"))
+                    else tostring end;
+                  (.buildInfo // .) as $b
+                  | "| **name** | \($b.name // "—") |",
+                    "| **number** | \($b.number // "—") |",
+                    "| **started** | (\($b.started) | fmt_ts) |",
+                    "| **modules** | \( ($b.modules // []) | length ) |",
+                    "| **dependency ids (distinct)** | \( [ ($b.modules // [])[] | .dependencies[]? | select(.id != null) | .id ] | unique | length ) |"
+                ' "${BF}"
+                echo ""
+                echo "## Promotion statuses (buildInfo.statuses)"
+                echo ""
+                echo "| Timestamp (UTC) | Status | Comment | User |"
+                echo "|-----------------|--------|---------|------|"
+                jq -r '
+                  def fmt_ts:
+                    if . == null or . == "" then "—"
+                    elif type == "string" and test("^[0-9]+$") then (tonumber / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC"))
+                    elif type == "number" then (. / 1000 | strftime("%Y-%m-%d %H:%M:%S UTC"))
+                    else tostring end;
+                  (.buildInfo // .).statuses // []
+                  | .[]
+                  | "| \((.timestamp | fmt_ts)) | \(.status // "—") | \(.comment // "—") | \(.user // "—") |"
+                ' "${BF}"
+                echo ""
+              } > "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+            else
+              {
+                echo "## Build API status"
+                echo ""
+                echo "_Could not load or parse \`api/build/${BUILD_NAME}/${BUILD_ID}\` (empty response, non-JSON, or curl failed)._"
+                echo ""
+              } > "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+            fi
+
+            echo "--- build-api-summary.md ---"
+            cat "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+
+            jf rt search "${RT_REPO_LOCAL_PROD}/*" \
+              --build="${BUILD_NAME}/${BUILD_ID}" \
+              --include-deps \
+              | tee "${PROMOTE_CHECKOUT_DIR}/promoted-artifacts-search.json"
+            jf rt download "${RT_REPO_LOCAL_PROD}/*" "${PROMOTE_CHECKOUT_DIR}/files/" \
+              --build="${BUILD_NAME}/${BUILD_ID}" \
+              --include-deps \
+              --flat=true \
+              --detailed-summary=true
+
+        - name: "Upload promotion checkout artifact"
+          uses: actions/upload-artifact@v4
+          with:
+            name: promote-checkout-${{ github.run_number }}
+            path: promote-checkout/
+
+        - name: "Promote Summary (job summary)"
+          run: |
+            {
+              echo "# :frog: Promote pipeline summary"
+              echo ""
+              echo "Build **\`${BUILD_NAME}\`** / **\`${BUILD_ID}\`** — prod checkout artifact: **promote-checkout-${{ github.run_number }}**."
+              echo ""
+              cat "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+              echo ""
+              echo "## Prod-local search (excerpt)"
+              echo ""
+              echo '```json'
+              head -c 8000 "${PROMOTE_CHECKOUT_DIR}/promoted-artifacts-search.json" || true
+              echo ""
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
