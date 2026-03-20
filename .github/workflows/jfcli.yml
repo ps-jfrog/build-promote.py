@@ -116,9 +116,9 @@ jobs:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
           disable-job-summary: ${{ env.JOB_SUMMARY }}
 
-      - name: "Build promote to dev-local"
+      - name: "BP: INIT → DEV local"
         env:
-          STATUS_COMMENT: "Promoting build INIT to DEV local"
+          STATUS_COMMENT: "Promoting: INIT → DEV"
         run: |
           set -euo pipefail
           jf rt bpr "${{ env.BUILD_NAME }}" "${{ env.BUILD_ID }}" "${{ env.RT_REPO_LOCAL_DEV }}" \
@@ -130,6 +130,10 @@ jobs:
         continue-on-error: true
         run: |
           jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
+
+      - name: "Sleep to Sync"
+        run: |
+          sleep 2
 
   promoteBuildToQA: 
     name: "DEV to QA"
@@ -150,9 +154,9 @@ jobs:
           oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
           disable-job-summary: ${{env.JOB_SUMMARY}}
         
-      - name: "Build promote to QA"
-        env: 
-          STATUS_COMMENT: "Promoting build DEV to QA"
+      - name: "BP: DEV → QA local"
+        env:
+          STATUS_COMMENT: "Promoting: DEV → QA"
         run: |
           jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_QA}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
 
@@ -160,7 +164,10 @@ jobs:
         continue-on-error: true
         run: |
           jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
-
+      
+      - name: "Sleep to Sync"
+        run: |
+          sleep 2
 
   promoteBuildToProd: 
     name: "Promote Build to Prod"
@@ -181,9 +188,9 @@ jobs:
           oidc-provider-name: ${{vars.JF_OIDC_PROVIDER_NAME}}
           disable-job-summary: ${{env.JOB_SUMMARY}}
       
-      - name: "QA to Prod"
-        env: 
-          STATUS_COMMENT: "Promoting build QA to Prod"
+      - name: "BP: QA → Prod local"
+        env:
+          STATUS_COMMENT: "Promoting: QA → Prod"
         run: |
           jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_PROD}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
 
@@ -192,6 +199,9 @@ jobs:
         run: |
           jf bs ${{env.BUILD_NAME}} ${{env.BUILD_ID}} --format=table --extended-table --vuln --rescan
 
+      - name: "Sleep to Sync"
+        run: |
+          sleep 2
 
   # Mirrors jfcli.sh: validate after bpr to dev-local (repo-root path, --include-deps=true, props fallback).
   validateDownloadDevLocal:
@@ -267,7 +277,7 @@ jobs:
             echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
             echo ""
-            echo "### Files"
+            echo "### Folder ${{env.VALIDATE_DL_DIR}} content after download"
             echo ""
             echo '```'
             find "${{env.VALIDATE_DL_DIR}}" -type f | sort
@@ -309,12 +319,21 @@ jobs:
             echo "::error::No files in ${{env.RT_REPO_LOCAL_QA}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Check bpr --copy and build properties on promoted artifacts."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${{env.RT_REPO_LOCAL_QA}}"
+          echo "OK: ${n} file(s) → ${{env.VALIDATE_DL_DIR}}"
+          echo ""
+          echo "Downloaded files (${{env.VALIDATE_DL_DIR}}):"
+          find "${{env.VALIDATE_DL_DIR}}" -type f -print | sort
           {
             echo "## Validate download — ${{env.RT_REPO_LOCAL_QA}}"
             echo ""
             echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
+            echo ""
+            echo "### Folder ${{env.VALIDATE_DL_DIR}} content after download"
+            echo ""
+            echo '```'
+            find "${{env.VALIDATE_DL_DIR}}" -type f | sort
+            echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
   validateDownloadProdLocal:
@@ -352,12 +371,21 @@ jobs:
             echo "::error::No files in ${{env.RT_REPO_LOCAL_PROD}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Check bpr --copy and build properties."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${{env.RT_REPO_LOCAL_PROD}}"
+          echo "OK: ${n} file(s) → ${{env.VALIDATE_DL_DIR}}"
+          echo ""
+          echo "Downloaded files (${{env.VALIDATE_DL_DIR}}):"
+          find "${{env.VALIDATE_DL_DIR}}" -type f -print | sort
           {
             echo "## Validate download — ${{env.RT_REPO_LOCAL_PROD}}"
             echo ""
             echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
+            echo ""
+            echo "### Folder ${{env.VALIDATE_DL_DIR}} content after download"
+            echo ""
+            echo '```'
+            find "${{env.VALIDATE_DL_DIR}}" -type f | sort
+            echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
   promoteSummary:
@@ -392,6 +420,7 @@ jobs:
             fi
 
             BF="${{env.PROMOTE_CHECKOUT_DIR}}/build-info.json"
+            cat "${BF}"
             if [[ "${API_OK}" -eq 1 ]] && jq empty "${BF}" 2>/dev/null; then
               {
                 echo "## Promotion statuses (buildInfo.statuses)"
@@ -435,18 +464,12 @@ jobs:
               "${{env.RT_REPO_LOCAL_PROD}}/" \
               "${{env.PROMOTE_CHECKOUT_DIR}}/files/"
 
-        - name: "Upload promotion checkout artifact"
-          uses: actions/upload-artifact@v6
-          with:
-            name: promote-checkout-${{ github.run_number }}
-            path: promote-checkout/
-
         - name: "Promote Summary (job summary)"
           run: |
             {
               echo "# :frog: Promote pipeline summary"
               echo ""
-              echo "Build **\`${{env.BUILD_NAME}}\`** / **\`${{env.BUILD_ID}}\`** — prod checkout artifact: **promote-checkout-${{ github.run_number }}**."
+              echo "Build **\`${{env.BUILD_NAME}}\`** / **\`${{env.BUILD_ID}}\`** - promotion summary."
               echo ""
               cat "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
               echo ""
