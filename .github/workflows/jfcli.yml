@@ -144,7 +144,6 @@ jobs:
     needs: buildPublish
     env:
       VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-virtual"
-      VALIDATE_REPO: "${{ env.RT_REPO_VIRTUAL }}"
     steps:
       - name: "Setup JFrog CLI"
         uses: jfrog/setup-jfrog-cli@v4
@@ -158,26 +157,26 @@ jobs:
       - name: "Download published build artifacts (virtual)"
         run: |
           set -euo pipefail
-          mkdir -p "${VALIDATE_DL_DIR}"
-          echo "Search (build artifacts in ${VALIDATE_REPO}):"
-          jf rt search "${VALIDATE_REPO}/*" --build="${BUILD_NAME}/${BUILD_ID}" | head -50 || true
-          jf rt download "${VALIDATE_REPO}/*" "${VALIDATE_DL_DIR}/" \
-            --build="${BUILD_NAME}/${BUILD_ID}" \
+          mkdir -p "${{env.VALIDATE_DL_DIR}}"
+          echo "Search (build artifacts in ${{env.RT_REPO_VIRTUAL}}):"
+          jf rt search "${{env.RT_REPO_VIRTUAL}}/*" --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" | head -50 || true
+          jf rt download "${{env.RT_REPO_VIRTUAL}}/*" "${{env.VALIDATE_DL_DIR}}/" \
+            --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
             --flat=true \
             --fail-no-op=true \
             --detailed-summary=true
-          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          n="$(find "${{env.VALIDATE_DL_DIR}}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files downloaded from ${VALIDATE_REPO} for build ${BUILD_NAME}/${BUILD_ID}. Publish may not have stamped artifacts, or build id mismatch."
+            echo "::error::No files downloaded from ${{env.RT_REPO_VIRTUAL}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Publish may not have stamped artifacts, or build id mismatch."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${VALIDATE_REPO}"
+          echo "OK: ${n} file(s) from ${{env.RT_REPO_VIRTUAL}}"
           {
-            echo "## Validate download — ${VALIDATE_REPO} (post-publish)"
+            echo "## Validate download — ${{env.RT_REPO_VIRTUAL}} (post-publish)"
             echo ""
-            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          } >> GITHUB_STEP_SUMMARY
 
   validateDownloadQaLocal:
     name: "Validate download (qa-local)"
@@ -198,26 +197,26 @@ jobs:
       - name: "Download artifacts for build from qa-local"
         run: |
           set -euo pipefail
-          mkdir -p "${VALIDATE_DL_DIR}"
+          mkdir -p "${{env.VALIDATE_DL_DIR}}"
           echo "Search (qa-local):"
-          jf rt search "${RT_REPO_LOCAL_QA}/*" --build="${BUILD_NAME}/${BUILD_ID}" | head -50 || true
-          jf rt download "${RT_REPO_LOCAL_QA}/*" "${VALIDATE_DL_DIR}/" \
-            --build="${BUILD_NAME}/${BUILD_ID}" \
+          jf rt search "${{env.RT_REPO_LOCAL_QA}}/*" --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" | head -50 || true
+          jf rt download "${{env.RT_REPO_LOCAL_QA}}/*" "${{env.VALIDATE_DL_DIR}}/" \
+            --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
             --flat=true \
             --fail-no-op=true \
             --detailed-summary=true
-          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          n="$(find "${{env.VALIDATE_DL_DIR}}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files in ${RT_REPO_LOCAL_QA} for build ${BUILD_NAME}/${BUILD_ID}. Check bpr --copy and build properties on promoted artifacts."
+            echo "::error::No files in ${{env.RT_REPO_LOCAL_QA}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Check bpr --copy and build properties on promoted artifacts."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_QA}"
+          echo "OK: ${n} file(s) from ${{env.RT_REPO_LOCAL_QA}}"
           {
-            echo "## Validate download — ${RT_REPO_LOCAL_QA}"
+            echo "## Validate download — ${{env.RT_REPO_LOCAL_QA}}"
             echo ""
-            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          } >> GITHUB_STEP_SUMMARY
 
   validateDownloadProdLocal:
     name: "Validate download (prod-local)"
@@ -238,26 +237,26 @@ jobs:
       - name: "Download artifacts for build from prod-local"
         run: |
           set -euo pipefail
-          mkdir -p "${VALIDATE_DL_DIR}"
+          mkdir -p "${{env.VALIDATE_DL_DIR}}"
           echo "Search (prod-local):"
-          jf rt search "${RT_REPO_LOCAL_PROD}/*" --build="${BUILD_NAME}/${BUILD_ID}" | head -50 || true
-          jf rt download "${RT_REPO_LOCAL_PROD}/*" "${VALIDATE_DL_DIR}/" \
-            --build="${BUILD_NAME}/${BUILD_ID}" \
+          jf rt search "${{env.RT_REPO_LOCAL_PROD}}/*" --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" | head -50 || true
+          jf rt download "${{env.RT_REPO_LOCAL_PROD}}/*" "${{env.VALIDATE_DL_DIR}}/" \
+            --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
             --flat=true \
             --fail-no-op=true \
             --detailed-summary=true
-          n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
+          n="$(find "${{env.VALIDATE_DL_DIR}}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files in ${RT_REPO_LOCAL_PROD} for build ${BUILD_NAME}/${BUILD_ID}. Check bpr --copy and build properties."
+            echo "::error::No files in ${{env.RT_REPO_LOCAL_PROD}} for build ${{env.BUILD_NAME}}/${{env.BUILD_ID}}. Check bpr --copy and build properties."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_PROD}"
+          echo "OK: ${n} file(s) from ${{env.RT_REPO_LOCAL_PROD}}"
           {
-            echo "## Validate download — ${RT_REPO_LOCAL_PROD}"
+            echo "## Validate download — ${{env.RT_REPO_LOCAL_PROD}}"
             echo ""
-            echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
+            echo "- **Build:** \`${{env.BUILD_NAME}}\` / \`${{env.BUILD_ID}}\`"
             echo "- **Files downloaded:** ${n}"
-          } >> "${GITHUB_STEP_SUMMARY}"
+          } >> GITHUB_STEP_SUMMARY
 
   promoteSummary:
     name: "Promote Summary"
@@ -282,15 +281,15 @@ jobs:
         - name: "Build API + checkout (prod-local)"
           run: |
             set -euo pipefail
-            mkdir -p "${PROMOTE_CHECKOUT_DIR}/files"
+            mkdir -p "${{env.PROMOTE_CHECKOUT_DIR}}/files"
             API_OK=0
-            if jf rt curl -sf "api/build/${BUILD_NAME}/${BUILD_ID}" > "${PROMOTE_CHECKOUT_DIR}/build-info.json"; then
+            if jf rt curl -sf "api/build/${{env.BUILD_NAME}}/${{env.BUILD_ID}}" > "${{env.PROMOTE_CHECKOUT_DIR}}/build-info.json"; then
               API_OK=1
             else
               echo "::warning::api/build request failed"
             fi
 
-            BF="${PROMOTE_CHECKOUT_DIR}/build-info.json"
+            BF="${{env.PROMOTE_CHECKOUT_DIR}}/build-info.json"
             if [[ "${API_OK}" -eq 1 ]] && jq empty "${BF}" 2>/dev/null; then
               {
                 echo "## Build API status"
@@ -338,25 +337,25 @@ jobs:
                   | "| \((.timestamp | fmt_ts)) | \(.status // "—") | \(.comment // "—") | \(.user // "—") |"
                 ' "${BF}"
                 echo ""
-              } > "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+              } > "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
             else
               {
                 echo "## Build API status"
                 echo ""
-                echo "_Could not load or parse \`api/build/${BUILD_NAME}/${BUILD_ID}\` (empty response, non-JSON, or curl failed)._"
+                echo "_Could not load or parse \`api/build/${{env.BUILD_NAME}}/${{env.BUILD_ID}}\` (empty response, non-JSON, or curl failed)._"
                 echo ""
-              } > "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+              } > "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
             fi
 
             echo "--- build-api-summary.md ---"
-            cat "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+            cat "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
 
-            jf rt search "${RT_REPO_LOCAL_PROD}/*" \
-              --build="${BUILD_NAME}/${BUILD_ID}" \
+            jf rt search "${{env.RT_REPO_LOCAL_PROD}}/*" \
+              --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
               --include-deps \
-              | tee "${PROMOTE_CHECKOUT_DIR}/promoted-artifacts-search.json"
-            jf rt download "${RT_REPO_LOCAL_PROD}/*" "${PROMOTE_CHECKOUT_DIR}/files/" \
-              --build="${BUILD_NAME}/${BUILD_ID}" \
+              | tee "${{env.PROMOTE_CHECKOUT_DIR}}/promoted-artifacts-search.json"
+            jf rt download "${{env.RT_REPO_LOCAL_PROD}}/*" "${{env.PROMOTE_CHECKOUT_DIR}}/files/" \
+              --build="${{env.BUILD_NAME}}/${{env.BUILD_ID}}" \
               --include-deps \
               --flat=true \
               --detailed-summary=true
@@ -372,14 +371,14 @@ jobs:
             {
               echo "# :frog: Promote pipeline summary"
               echo ""
-              echo "Build **\`${BUILD_NAME}\`** / **\`${BUILD_ID}\`** — prod checkout artifact: **promote-checkout-${{ github.run_number }}**."
+              echo "Build **\`${{env.BUILD_NAME}}\`** / **\`${{env.BUILD_ID}}\`** — prod checkout artifact: **promote-checkout-${{ github.run_number }}**."
               echo ""
-              cat "${PROMOTE_CHECKOUT_DIR}/build-api-summary.md"
+              cat "${{env.PROMOTE_CHECKOUT_DIR}}/build-api-summary.md"
               echo ""
               echo "## Prod-local search (excerpt)"
               echo ""
               echo '```json'
-              head -c 8000 "${PROMOTE_CHECKOUT_DIR}/promoted-artifacts-search.json" || true
+              head -c 8000 "${{env.PROMOTE_CHECKOUT_DIR}}/promoted-artifacts-search.json" || true
               echo ""
               echo '```'
-            } >> "${GITHUB_STEP_SUMMARY}"
+            } >> GITHUB_STEP_SUMMARY
