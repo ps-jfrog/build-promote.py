@@ -137,12 +137,14 @@ jobs:
           run: |
             jf rt bpr ${{env.BUILD_NAME}} ${{env.BUILD_ID}} ${{env.RT_REPO_LOCAL_PROD}} --status="${{env.STATUS_COMMENT}}" --include-dependencies --copy
 
+  # Artifacts + build properties exist on the virtual repo after jf rt bp — not on *-local until promote.
   validateDownloadDevLocal:
-    name: "Validate download (dev-local)"
+    name: "Validate download (virtual after publish)"
     runs-on: ubuntu-latest
     needs: buildPublish
     env:
-      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-dev-local"
+      VALIDATE_DL_DIR: "${{ github.workspace }}/validate-dl-virtual"
+      VALIDATE_REPO: "${{ env.RT_REPO_VIRTUAL }}"
     steps:
       - name: "Setup JFrog CLI"
         uses: jfrog/setup-jfrog-cli@v4
@@ -153,24 +155,25 @@ jobs:
           oidc-provider-name: ${{ vars.JF_OIDC_PROVIDER_NAME }}
           disable-job-summary: ${{ env.JOB_SUMMARY }}
 
-      - name: "Download artifacts for build from dev-local"
+      - name: "Download published build artifacts (virtual)"
         run: |
           set -euo pipefail
           mkdir -p "${VALIDATE_DL_DIR}"
-          jf rt download "${RT_REPO_LOCAL_DEV}/*" "${VALIDATE_DL_DIR}/" \
+          echo "Search (build artifacts in ${VALIDATE_REPO}):"
+          jf rt search "${VALIDATE_REPO}/*" --build="${BUILD_NAME}/${BUILD_ID}" | head -50 || true
+          jf rt download "${VALIDATE_REPO}/*" "${VALIDATE_DL_DIR}/" \
             --build="${BUILD_NAME}/${BUILD_ID}" \
-            --include-deps \
             --flat=true \
             --fail-no-op=true \
             --detailed-summary=true
           n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files downloaded from ${RT_REPO_LOCAL_DEV} for build ${BUILD_NAME}/${BUILD_ID}"
+            echo "::error::No files downloaded from ${VALIDATE_REPO} for build ${BUILD_NAME}/${BUILD_ID}. Publish may not have stamped artifacts, or build id mismatch."
             exit 1
           fi
-          echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_DEV}"
+          echo "OK: ${n} file(s) from ${VALIDATE_REPO}"
           {
-            echo "## Validate download — ${RT_REPO_LOCAL_DEV}"
+            echo "## Validate download — ${VALIDATE_REPO} (post-publish)"
             echo ""
             echo "- **Build:** \`${BUILD_NAME}\` / \`${BUILD_ID}\`"
             echo "- **Files downloaded:** ${n}"
@@ -196,15 +199,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${VALIDATE_DL_DIR}"
+          echo "Search (qa-local):"
+          jf rt search "${RT_REPO_LOCAL_QA}/*" --build="${BUILD_NAME}/${BUILD_ID}" | head -50 || true
           jf rt download "${RT_REPO_LOCAL_QA}/*" "${VALIDATE_DL_DIR}/" \
             --build="${BUILD_NAME}/${BUILD_ID}" \
-            --include-deps \
             --flat=true \
             --fail-no-op=true \
             --detailed-summary=true
           n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files downloaded from ${RT_REPO_LOCAL_QA} for build ${BUILD_NAME}/${BUILD_ID}"
+            echo "::error::No files in ${RT_REPO_LOCAL_QA} for build ${BUILD_NAME}/${BUILD_ID}. Check bpr --copy and build properties on promoted artifacts."
             exit 1
           fi
           echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_QA}"
@@ -235,15 +239,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${VALIDATE_DL_DIR}"
+          echo "Search (prod-local):"
+          jf rt search "${RT_REPO_LOCAL_PROD}/*" --build="${BUILD_NAME}/${BUILD_ID}" | head -50 || true
           jf rt download "${RT_REPO_LOCAL_PROD}/*" "${VALIDATE_DL_DIR}/" \
             --build="${BUILD_NAME}/${BUILD_ID}" \
-            --include-deps \
             --flat=true \
             --fail-no-op=true \
             --detailed-summary=true
           n="$(find "${VALIDATE_DL_DIR}" -type f | wc -l | tr -d ' ')"
           if [[ "${n}" -lt 1 ]]; then
-            echo "::error::No files downloaded from ${RT_REPO_LOCAL_PROD} for build ${BUILD_NAME}/${BUILD_ID}"
+            echo "::error::No files in ${RT_REPO_LOCAL_PROD} for build ${BUILD_NAME}/${BUILD_ID}. Check bpr --copy and build properties."
             exit 1
           fi
           echo "OK: ${n} file(s) from ${RT_REPO_LOCAL_PROD}"
